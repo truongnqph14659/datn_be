@@ -1,0 +1,35 @@
+enum STATUS {
+  USED = 'USED',
+  DISABLE = 'DISABLE',
+}
+
+export const HINH_THUC_NGHI_PHEP = {
+  MOT_NGAY: 'MOT_NGAY',
+  NHIEU_NGAY: 'NHIEU_NGAY',
+  BUOI_SANG: 'BUOI_SANG',
+  BUOI_CHIEU: 'BUOI_CHIEU',
+} as const;
+
+export const REQUEST_TYPE = {
+  DI_MUON_VE_SOM: 3,
+  NGHI_PHEP: 4,
+  NGHI_VIEC: 5,
+  DANG_KY_LAM_CONG: 6,
+  DANG_KY_LAM_NO_LUC: 7,
+  DI_CONG_TAC: 8,
+  THAY_DOI_GIO_CHAM_CONG: 9,
+} as const;
+
+export const REQUEST_CODE = {
+  DI_MUON_VE_SOM: 'DMVS',
+  NGHI_PHEP: 'NGHI_PHEP',
+  NGHI_VIEC: 'NGHI_VIEC',
+  DANG_KY_LAM_CONG: 'LAM_CONG',
+  DANG_KY_LAM_NO_LUC: 'LAM_NO_LUC',
+  DI_CONG_TAC: 'CONG_TAC',
+} as const;
+
+export const LOAI_NGHI_PHEP = {
+  CO_LUONG: 'CO_LUONG',
+  KHONG_LUONG: 'KHONG_LUONG',
+} as const;
