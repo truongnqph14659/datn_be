@@ -1,6 +1,8 @@
+import {CheckInOutEntity} from './../check-in-out/entities/check-in-out.entity';
 import {BadRequestException, Injectable, NotFoundException} from '@nestjs/common';
 import {OnEvent} from '@nestjs/event-emitter';
 import {InjectRepository} from '@nestjs/typeorm';
+import {error} from 'console';
 import {format} from 'date-fns';
 import * as dayjs from 'dayjs';
 import * as isoWeek from 'dayjs/plugin/isoWeek';
@@ -66,84 +68,6 @@ export class AttendancesService {
     });
     await this.attendanceRepo.save(attendance);
     return attendance;
-  }
-
-  @OnEvent('check-in-out.created')
-  async updateFromCheckInOut({
-    manager,
-    employeeId,
-    workDate,
-  }: {
-    manager: EntityManager;
-    employeeId: number;
-    workDate: Date;
-  }) {
-    const [attendanceRecord, checkInOutSummary, workSchedule]: [
-      AttendanceEntity | null,
-      CheckInOutSummary,
-      WorkScheduleEntity | null,
-    ] = await Promise.all([
-      // Kiểm tra xem đã có attendance cho nhân viên và ngày này chưa
-      this.findAttendanceByEmployeeIdAndDateHasManager({manager, employeeId, workDate}),
-      // Lấy thông tin check-in và check-out từ bảng check_in_out
-      this.checkInOutService.getCheckInOutSummaryForDayHasManager(manager, employeeId, workDate),
-      // Lấy lịch làm việc của nhân viên
-      this.getEmployeeWorkSchedule(employeeId),
-    ]);
-
-    // Trường hợp không có bản ghi attendance
-    if (!attendanceRecord) {
-      // Tạo bản ghi mới với chỉ thông tin check-in
-      const attendance = manager.create(AttendanceEntity, {
-        employeeId,
-        workDate: dayjs(workDate).startOf('day').toDate(),
-        checkin: checkInOutSummary.earliestCheckin,
-        total_hours: 0,
-        total_request_hours: workSchedule?.expected_hours || 0,
-        rateOfWork: 0,
-      });
-      await manager.save(attendance);
-      return;
-    }
-    // Nếu đã có bản ghi attendance và checkin = null
-    if (attendanceRecord && !attendanceRecord.checkin) {
-      await manager.update(
-        AttendanceEntity,
-        {_id: attendanceRecord._id},
-        {
-          checkin: checkInOutSummary.earliestCheckin,
-          total_request_hours: workSchedule?.expected_hours || 0,
-        },
-      );
-      return;
-    }
-    // Nếu là trường hợp OT (có overtime > 0), lấy thời gian check-in và check-out mới nhất cho phần OT (Xử lý trường hợp có overtime)
-    // nghiên cứu lại
-    // if (
-    //   attendanceRecord.overtime &&
-    //   attendanceRecord.overtime > 0 &&
-    //   checkInOutSummary.latestCheckin &&
-    //   checkInOutSummary.latestCheckout
-    // ) {
-    //   const result = await this.handleOvertimeUpdate(employeeId, workDate, attendanceRecord);
-    //   if (result) {
-    //     return result;
-    //   }
-    // }
-    // Trường hợp đã có bản ghi và có dữ liệu checkout mới
-    if (checkInOutSummary.latestCheckout) {
-      // Cập nhật bản ghi attendance với dữ liệu check-out mới
-      const result = await this.updateAttendanceWithCheckOut(
-        manager,
-        attendanceRecord,
-        checkInOutSummary,
-        workSchedule,
-      );
-      if (result) {
-        return result;
-      }
-    }
-    return {message: 'Không có thay đổi nào được thực hiện'};
   }
 
   async findAll(params: QueryAttendanceDto) {
@@ -254,7 +178,7 @@ export class AttendancesService {
   //   return null;
   // }
 
-  private async updateAttendanceWithCheckOut(
+  async updateAttendanceWithCheckOut(
     manager: EntityManager,
     attendanceRecord: AttendanceEntity,
     checkInOutSummary: CheckInOutSummary,
@@ -1332,35 +1256,6 @@ export class AttendancesService {
   async findAttendanceByEmployeeIdAndDate({employeeId, workDate}: {employeeId: number; workDate: Date}) {
     const result = await this.attendanceRepo
       .createQueryBuilder('attendance')
-      .select([
-        'attendance._id AS _id',
-        'attendance.employeeId AS employeeId',
-        'attendance.workDate AS workDate',
-        'attendance.checkin AS checkin',
-        'attendance.checkout AS checkout',
-        'attendance.total_hours AS total_hours',
-        'attendance.overtime AS overtime',
-        'attendance.isPenalty AS isPenalty',
-        'attendance.total_request_hours AS total_request_hours',
-        'attendance.rateOfWork AS rateOfWork',
-      ])
-      .where('attendance.employeeId = :employeeId', {employeeId})
-      .andWhere('DATE(attendance.workDate) = DATE(:workDate)', {workDate})
-      .getRawOne();
-    return result;
-  }
-
-  async findAttendanceByEmployeeIdAndDateHasManager({
-    manager,
-    employeeId,
-    workDate,
-  }: {
-    manager: EntityManager;
-    employeeId: number;
-    workDate: Date;
-  }) {
-    const result = await manager
-      .createQueryBuilder(AttendanceEntity, 'attendance')
       .select([
         'attendance._id AS _id',
         'attendance.employeeId AS employeeId',
