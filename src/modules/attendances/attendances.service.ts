@@ -25,7 +25,7 @@ import {
   convertTimeToMinutes,
   formatTimeFromDate,
 } from 'src/utils/time-helper';
-import {Repository} from 'typeorm';
+import {EntityManager, Repository} from 'typeorm';
 
 dayjs.extend(isoWeek);
 dayjs.extend(weekOfYear);
@@ -69,28 +69,32 @@ export class AttendancesService {
   }
 
   @OnEvent('check-in-out.created')
-  async updateFromCheckInOut({employeeId, workDate}: {employeeId: number; workDate: Date}) {
+  async updateFromCheckInOut({
+    manager,
+    employeeId,
+    workDate,
+  }: {
+    manager: EntityManager;
+    employeeId: number;
+    workDate: Date;
+  }) {
     const [attendanceRecord, checkInOutSummary, workSchedule]: [
       AttendanceEntity | null,
       CheckInOutSummary,
       WorkScheduleEntity | null,
     ] = await Promise.all([
       // Kiểm tra xem đã có attendance cho nhân viên và ngày này chưa
-      this.findAttendanceByEmployeeIdAndDate({employeeId, workDate}),
+      this.findAttendanceByEmployeeIdAndDateHasManager({manager, employeeId, workDate}),
       // Lấy thông tin check-in và check-out từ bảng check_in_out
-      this.checkInOutService.getCheckInOutSummaryForDay(employeeId, workDate),
+      this.checkInOutService.getCheckInOutSummaryForDayHasManager(manager, employeeId, workDate),
       // Lấy lịch làm việc của nhân viên
       this.getEmployeeWorkSchedule(employeeId),
     ]);
 
-    // Nếu không có dữ liệu check-in
-    if (!checkInOutSummary.earliestCheckin) {
-      return {message: 'Không có dữ liệu check-in để xử lý'};
-    }
     // Trường hợp không có bản ghi attendance
     if (!attendanceRecord) {
       // Tạo bản ghi mới với chỉ thông tin check-in
-      const attendance = this.attendanceRepo.create({
+      const attendance = manager.create(AttendanceEntity, {
         employeeId,
         workDate: dayjs(workDate).startOf('day').toDate(),
         checkin: checkInOutSummary.earliestCheckin,
@@ -98,19 +102,20 @@ export class AttendancesService {
         total_request_hours: workSchedule?.expected_hours || 0,
         rateOfWork: 0,
       });
-      await this.attendanceRepo.save(attendance);
-      return {message: 'Đã tạo bản ghi attendance mới với dữ liệu check-in'};
+      await manager.save(attendance);
+      return;
     }
     // Nếu đã có bản ghi attendance và checkin = null
     if (attendanceRecord && !attendanceRecord.checkin) {
-      await this.attendanceRepo.update(
+      await manager.update(
+        AttendanceEntity,
         {_id: attendanceRecord._id},
         {
           checkin: checkInOutSummary.earliestCheckin,
           total_request_hours: workSchedule?.expected_hours || 0,
         },
       );
-      return {message: 'Đã cập nhật bản ghi attendance với dữ liệu check-in mới'};
+      return;
     }
     // Nếu là trường hợp OT (có overtime > 0), lấy thời gian check-in và check-out mới nhất cho phần OT (Xử lý trường hợp có overtime)
     // nghiên cứu lại
@@ -128,7 +133,12 @@ export class AttendancesService {
     // Trường hợp đã có bản ghi và có dữ liệu checkout mới
     if (checkInOutSummary.latestCheckout) {
       // Cập nhật bản ghi attendance với dữ liệu check-out mới
-      const result = await this.updateAttendanceWithCheckOut(attendanceRecord, checkInOutSummary, workSchedule);
+      const result = await this.updateAttendanceWithCheckOut(
+        manager,
+        attendanceRecord,
+        checkInOutSummary,
+        workSchedule,
+      );
       if (result) {
         return result;
       }
@@ -245,6 +255,7 @@ export class AttendancesService {
   // }
 
   private async updateAttendanceWithCheckOut(
+    manager: EntityManager,
     attendanceRecord: AttendanceEntity,
     checkInOutSummary: CheckInOutSummary,
     workSchedule: WorkScheduleEntity,
@@ -291,7 +302,8 @@ export class AttendancesService {
       rateOfWork = Math.floor(ratio * 100) / 100;
     }
 
-    await this.attendanceRepo.update(
+    await manager.update(
+      AttendanceEntity,
       {_id: attendanceRecord._id},
       {
         checkout: checkoutTime,
@@ -299,7 +311,7 @@ export class AttendancesService {
         rateOfWork,
       },
     );
-    return {message: 'Đã cập nhật bản ghi attendance với dữ liệu checkout mới'};
+    return 1;
   }
 
   private calculateDateRange(month?: number, week?: number, year: number = new Date().getFullYear()) {
@@ -1320,6 +1332,35 @@ export class AttendancesService {
   async findAttendanceByEmployeeIdAndDate({employeeId, workDate}: {employeeId: number; workDate: Date}) {
     const result = await this.attendanceRepo
       .createQueryBuilder('attendance')
+      .select([
+        'attendance._id AS _id',
+        'attendance.employeeId AS employeeId',
+        'attendance.workDate AS workDate',
+        'attendance.checkin AS checkin',
+        'attendance.checkout AS checkout',
+        'attendance.total_hours AS total_hours',
+        'attendance.overtime AS overtime',
+        'attendance.isPenalty AS isPenalty',
+        'attendance.total_request_hours AS total_request_hours',
+        'attendance.rateOfWork AS rateOfWork',
+      ])
+      .where('attendance.employeeId = :employeeId', {employeeId})
+      .andWhere('DATE(attendance.workDate) = DATE(:workDate)', {workDate})
+      .getRawOne();
+    return result;
+  }
+
+  async findAttendanceByEmployeeIdAndDateHasManager({
+    manager,
+    employeeId,
+    workDate,
+  }: {
+    manager: EntityManager;
+    employeeId: number;
+    workDate: Date;
+  }) {
+    const result = await manager
+      .createQueryBuilder(AttendanceEntity, 'attendance')
       .select([
         'attendance._id AS _id',
         'attendance.employeeId AS employeeId',
